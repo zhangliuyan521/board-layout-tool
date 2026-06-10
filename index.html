@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#156f5b" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="板材排料" />
+    <title>板材排料工具</title>
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="workspace">
+        <aside class="input-panel" aria-label="排料输入">
+          <header class="topbar">
+            <div>
+              <h1>板材排料工具</h1>
+              <p>矩形板材本地排版，数据自动保留</p>
+            </div>
+            <button id="loadExampleBtn" class="ghost-btn" type="button">示例</button>
+          </header>
+
+          <section class="block">
+            <div class="block-title">
+              <h2>大板规格</h2>
+              <div class="button-group">
+                <button id="addBoardBtn" class="small-btn" type="button">新增</button>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table id="boardsTable">
+                <thead>
+                  <tr>
+                    <th>名称</th>
+                    <th>长</th>
+                    <th>宽</th>
+                    <th>可用张数</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="block">
+            <div class="block-title">
+              <h2>小料清单</h2>
+              <div class="button-group">
+                <button id="addPartBtn" class="small-btn" type="button">新增</button>
+                <button id="clearPartsBtn" class="small-btn danger-text" type="button">清空</button>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table id="partsTable">
+                <thead>
+                  <tr>
+                    <th>名称</th>
+                    <th>长</th>
+                    <th>宽</th>
+                    <th>数量</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="block">
+            <div class="block-title">
+              <h2>批量导入小料</h2>
+              <button id="importPartsBtn" class="small-btn" type="button">导入</button>
+            </div>
+            <textarea
+              id="bulkInput"
+              rows="5"
+              placeholder="每行一条：名称,长,宽,数量&#10;也支持：层板 680 320 10 或 680x320x6"
+            ></textarea>
+          </section>
+
+          <section class="block options-grid">
+            <label>
+              <span>锯缝</span>
+              <input id="kerfInput" type="number" min="0" step="0.1" value="3" />
+            </label>
+            <label>
+              <span>边距</span>
+              <input id="marginInput" type="number" min="0" step="0.1" value="5" />
+            </label>
+          </section>
+
+          <section class="block">
+            <h2>排版模式</h2>
+            <div class="mode-tabs" role="tablist" aria-label="排版模式">
+              <button id="mixedModeBtn" class="mode-btn active" type="button">混拼排版</button>
+              <button id="directedModeBtn" class="mode-btn" type="button">定向裁切排版</button>
+            </div>
+            <div id="directionPanel" class="direction-panel" hidden>
+              <label>
+                <input type="radio" name="direction" value="horizontal" checked />
+                <span>仅横放</span>
+              </label>
+              <label>
+                <input type="radio" name="direction" value="vertical" />
+                <span>仅竖放</span>
+              </label>
+            </div>
+          </section>
+
+          <div class="action-row">
+            <button id="optimizeBtn" class="primary-btn" type="button">开始排版</button>
+            <button id="exportBtn" class="ghost-btn" type="button">导出 CSV</button>
+            <button id="clearAllBtn" class="ghost-btn danger-text" type="button">清空全部</button>
+          </div>
+          <p id="message" class="message" role="status"></p>
+        </aside>
+
+        <section class="result-panel" aria-label="排版结果">
+          <div class="summary-strip">
+            <div>
+              <span>总利用率</span>
+              <strong id="utilizationText">-</strong>
+            </div>
+            <div>
+              <span>消耗大板</span>
+              <strong id="sheetCountText">-</strong>
+            </div>
+            <div>
+              <span>已排小料</span>
+              <strong id="placedCountText">-</strong>
+            </div>
+            <div>
+              <span>未排小料</span>
+              <strong id="unplacedCountText">-</strong>
+            </div>
+          </div>
+
+          <div class="viewer-toolbar">
+            <button id="prevSheetBtn" class="icon-btn" type="button" title="上一张">‹</button>
+            <div id="sheetLabel" class="sheet-label">暂无排版</div>
+            <button id="nextSheetBtn" class="icon-btn" type="button" title="下一张">›</button>
+          </div>
+
+          <div class="canvas-stage">
+            <canvas id="layoutCanvas" width="1280" height="820"></canvas>
+          </div>
+
+          <div class="details-grid">
+            <section>
+              <h2>用板明细</h2>
+              <div id="sheetDetails" class="detail-list"></div>
+            </section>
+            <section>
+              <h2>未排入小料</h2>
+              <div id="unplacedDetails" class="detail-list"></div>
+            </section>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

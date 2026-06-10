@@ -1,0 +1,18 @@
+{
+  "name": "板材排料工具",
+  "short_name": "板材排料",
+  "description": "纯本地矩形板材排料工具",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#f3f5f2",
+  "theme_color": "#156f5b",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
