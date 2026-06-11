@@ -4,7 +4,7 @@ const state = {
   sheets: [],
   unplaced: [],
   currentSheet: 0,
-  mode: "mixed",
+  mode: "guillotine",
   lastCsv: "",
 };
 
@@ -181,7 +181,7 @@ function getOptions() {
   };
 }
 
-// 混拼模式使用 MaxRects：每次选择当前最贴合空位的小料。
+// 旧版自由混拼使用 MaxRects，保留类定义仅用于兼容，不作为实际裁切模式。
 class MaxRectsBin {
   constructor(board, kerf, margin) {
     this.board = board;
@@ -309,52 +309,164 @@ function packMixed(board, remaining, options) {
   return makePackedResult(board, bin.used, placedKeys);
 }
 
-// 定向模式不再旋转单个小料，按统一方向逐行/逐列裁切式排布。
-function packDirected(board, remaining, options) {
-  const placements = [];
-  const placedKeys = new Set();
-  const innerW = board.w - options.margin * 2;
-  const innerH = board.h - options.margin * 2;
-  let x = 0;
-  let y = 0;
-  let laneSize = 0;
+class GuillotineBin {
+  constructor(board, kerf, margin, allowRotate) {
+    this.board = board;
+    this.kerf = kerf;
+    this.margin = margin;
+    this.allowRotate = allowRotate;
+    this.innerW = board.w - margin * 2;
+    this.innerH = board.h - margin * 2;
+    this.free = [{ x: 0, y: 0, w: this.innerW, h: this.innerH }];
+    this.used = [];
+    this.cuts = [];
+  }
 
-  for (const part of remaining) {
-    if (placedKeys.has(part.instance)) continue;
-    if (part.w > innerW || part.h > innerH) continue;
+  orientations(part) {
+    const variants = [{ w: part.w, h: part.h, rotated: Boolean(part.forcedRotated) }];
+    if (this.allowRotate && part.w !== part.h) {
+      variants.push({ w: part.h, h: part.w, rotated: !part.forcedRotated });
+    }
+    return variants.map((item) => ({
+      ...item,
+      rw: item.w + this.kerf,
+      rh: item.h + this.kerf,
+    }));
+  }
 
-    if (options.direction === "horizontal") {
-      if (x > 0 && x + part.w > innerW) {
-        x = 0;
-        y += laneSize + options.kerf;
-        laneSize = 0;
+  score(part) {
+    let best = null;
+    for (let rectIndex = 0; rectIndex < this.free.length; rectIndex += 1) {
+      const rect = this.free[rectIndex];
+      for (const item of this.orientations(part)) {
+        if (item.rw > rect.w || item.rh > rect.h) continue;
+        for (const split of ["vertical", "horizontal"]) {
+          const waste = rect.w * rect.h - item.rw * item.rh;
+          const shortSide = Math.min(rect.w - item.rw, rect.h - item.rh);
+          const longSide = Math.max(rect.w - item.rw, rect.h - item.rh);
+          const splitBias =
+            split === "vertical" ? Math.abs(rect.h - item.rh) : Math.abs(rect.w - item.rw);
+          const score = waste * 100000000 + shortSide * 10000 + longSide + splitBias;
+          if (!best || score < best.score) best = { rect, rectIndex, item, split, score };
+        }
       }
-      if (y + part.h > innerH) continue;
-      placements.push({ ...part, x, y, rotated: part.forcedRotated });
-      placedKeys.add(part.instance);
-      x += part.w + options.kerf;
-      laneSize = Math.max(laneSize, part.h);
-    } else {
-      if (y > 0 && y + part.h > innerH) {
-        y = 0;
-        x += laneSize + options.kerf;
-        laneSize = 0;
-      }
-      if (x + part.w > innerW) continue;
-      placements.push({ ...part, x, y, rotated: part.forcedRotated });
-      placedKeys.add(part.instance);
-      y += part.h + options.kerf;
-      laneSize = Math.max(laneSize, part.w);
+    }
+    return best;
+  }
+
+  insert(part) {
+    const placement = this.score(part);
+    if (!placement) return false;
+
+    const node = {
+      ...part,
+      x: placement.rect.x,
+      y: placement.rect.y,
+      w: placement.item.w,
+      h: placement.item.h,
+      rw: placement.item.rw,
+      rh: placement.item.rh,
+      rotated: placement.item.rotated,
+    };
+
+    this.used.push(node);
+    const nextRects = splitGuillotineRect(placement.rect, node, placement.split, this.cuts);
+    this.free.splice(placement.rectIndex, 1, ...nextRects);
+    this.free = this.free
+      .filter((rect) => rect.w > 0.001 && rect.h > 0.001)
+      .sort((a, b) => a.y - b.y || a.x - b.x || b.w * b.h - a.w * a.h);
+    return true;
+  }
+}
+
+function splitGuillotineRect(rect, used, split, cuts) {
+  const pieces = [];
+  const cutIndexBase = cuts.length + 1;
+  const rightW = rect.w - used.rw;
+  const bottomH = rect.h - used.rh;
+
+  if (split === "vertical") {
+    if (rightW > 0.001) {
+      cuts.push({
+        index: cutIndexBase,
+        orientation: "vertical",
+        x: rect.x + used.rw,
+        y1: rect.y,
+        y2: rect.y + rect.h,
+      });
+      pieces.push({ x: rect.x + used.rw, y: rect.y, w: rightW, h: rect.h });
+    }
+    if (bottomH > 0.001) {
+      cuts.push({
+        index: cuts.length + 1,
+        orientation: "horizontal",
+        y: rect.y + used.rh,
+        x1: rect.x,
+        x2: rect.x + used.rw,
+      });
+      pieces.push({ x: rect.x, y: rect.y + used.rh, w: used.rw, h: bottomH });
+    }
+  } else {
+    if (bottomH > 0.001) {
+      cuts.push({
+        index: cutIndexBase,
+        orientation: "horizontal",
+        y: rect.y + used.rh,
+        x1: rect.x,
+        x2: rect.x + rect.w,
+      });
+      pieces.push({ x: rect.x, y: rect.y + used.rh, w: rect.w, h: bottomH });
+    }
+    if (rightW > 0.001) {
+      cuts.push({
+        index: cuts.length + 1,
+        orientation: "vertical",
+        x: rect.x + used.rw,
+        y1: rect.y,
+        y2: rect.y + used.rh,
+      });
+      pieces.push({ x: rect.x + used.rw, y: rect.y, w: rightW, h: used.rh });
     }
   }
 
-  return makePackedResult(board, placements, placedKeys);
+  return pieces;
 }
 
-function makePackedResult(board, placements, placedKeys) {
+function packGuillotine(board, remaining, options) {
+  const allowRotate = options.mode === "guillotine";
+  const bin = new GuillotineBin(board, options.kerf, options.margin, allowRotate);
+  const placedKeys = new Set();
+  let progress = true;
+
+  while (progress) {
+    progress = false;
+    let bestIndex = -1;
+    let bestScore = null;
+
+    for (let i = 0; i < remaining.length; i += 1) {
+      if (placedKeys.has(remaining[i].instance)) continue;
+      const score = bin.score(remaining[i]);
+      if (!score) continue;
+      if (!bestScore || score.score < bestScore.score) {
+        bestIndex = i;
+        bestScore = score;
+      }
+    }
+
+    if (bestIndex >= 0 && bin.insert({ ...remaining[bestIndex] })) {
+      placedKeys.add(remaining[bestIndex].instance);
+      progress = true;
+    }
+  }
+
+  return makePackedResult(board, bin.used, placedKeys, bin.cuts);
+}
+
+function makePackedResult(board, placements, placedKeys, cuts = []) {
   return {
     board,
     placements,
+    cuts,
     placedKeys,
     partArea: placements.reduce((sum, item) => sum + item.w * item.h, 0),
   };
@@ -380,7 +492,7 @@ function optimize() {
     for (const board of boards) {
       if ((stockLeft.get(board.id) ?? 0) <= 0) continue;
       if (board.w <= options.margin * 2 || board.h <= options.margin * 2) continue;
-      const packed = options.mode === "mixed" ? packMixed(board, remaining, options) : packDirected(board, remaining, options);
+      const packed = packGuillotine(board, remaining, options);
       if (!packed.placements.length) continue;
       const boardArea = board.w * board.h;
       const utilization = packed.partArea / boardArea;
@@ -478,10 +590,62 @@ function renderCanvas() {
     if (w > 48 && h > 25) drawPartLabel(part, x, y, w, h);
   });
 
+  drawCuts(sheet, ox, oy, scale, margin);
+
   const utilization = ((sheet.partArea / (sheet.board.w * sheet.board.h)) * 100).toFixed(1);
-  const modeText = sheet.options.mode === "mixed" ? "混拼" : sheet.options.direction === "horizontal" ? "仅横放" : "仅竖放";
+  const modeText = getModeText(sheet.options);
   document.querySelector("#sheetLabel").textContent =
     `第 ${state.currentSheet + 1}/${state.sheets.length} 张：${sheet.board.name} ${sheet.board.w}×${sheet.board.h}，${modeText}，利用率 ${utilization}%`;
+}
+
+function drawCuts(sheet, ox, oy, scale, margin) {
+  if (!sheet.cuts?.length) return;
+  ctx.save();
+  ctx.strokeStyle = "rgba(185,71,53,0.9)";
+  ctx.fillStyle = "#b94735";
+  ctx.lineWidth = 2;
+  ctx.setLineDash([10, 7]);
+  ctx.font = "700 13px sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+
+  sheet.cuts.forEach((cut) => {
+    if (cut.orientation === "vertical") {
+      const x = ox + (cut.x + margin) * scale;
+      const y1 = oy + (cut.y1 + margin) * scale;
+      const y2 = oy + (cut.y2 + margin) * scale;
+      ctx.beginPath();
+      ctx.moveTo(x, y1);
+      ctx.lineTo(x, y2);
+      ctx.stroke();
+      drawCutBadge(cut.index, x, Math.max(y1 + 14, Math.min(y2 - 14, (y1 + y2) / 2)));
+    } else {
+      const y = oy + (cut.y + margin) * scale;
+      const x1 = ox + (cut.x1 + margin) * scale;
+      const x2 = ox + (cut.x2 + margin) * scale;
+      ctx.beginPath();
+      ctx.moveTo(x1, y);
+      ctx.lineTo(x2, y);
+      ctx.stroke();
+      drawCutBadge(cut.index, Math.max(x1 + 14, Math.min(x2 - 14, (x1 + x2) / 2)), y);
+    }
+  });
+  ctx.restore();
+}
+
+function drawCutBadge(index, x, y) {
+  ctx.save();
+  ctx.setLineDash([]);
+  ctx.fillStyle = "#ffffff";
+  ctx.strokeStyle = "#b94735";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(x, y, 12, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = "#b94735";
+  ctx.fillText(index, x, y + 0.5);
+  ctx.restore();
 }
 
 function drawPartLabel(part, x, y, w, h) {
@@ -533,7 +697,7 @@ function renderDetails() {
 function buildCsv() {
   const rows = [["板序", "大板", "大板长", "大板宽", "模式", "小料", "长", "宽", "X", "Y", "旋转"]];
   state.sheets.forEach((sheet) => {
-    const modeText = sheet.options.mode === "mixed" ? "混拼排版" : sheet.options.direction === "horizontal" ? "定向-仅横放" : "定向-仅竖放";
+    const modeText = getModeText(sheet.options);
     sheet.placements.forEach((part) => {
       rows.push([
         sheet.index,
@@ -549,8 +713,24 @@ function buildCsv() {
         part.rotated ? "是" : "否",
       ]);
     });
+    rows.push([]);
+    rows.push(["裁切顺序", "板序", "方向", "位置", "起点", "终点"]);
+    sheet.cuts.forEach((cut) => {
+      if (cut.orientation === "vertical") {
+        rows.push([cut.index, sheet.index, "竖切", Math.round(cut.x + sheet.options.margin), Math.round(cut.y1 + sheet.options.margin), Math.round(cut.y2 + sheet.options.margin)]);
+      } else {
+        rows.push([cut.index, sheet.index, "横切", Math.round(cut.y + sheet.options.margin), Math.round(cut.x1 + sheet.options.margin), Math.round(cut.x2 + sheet.options.margin)]);
+      }
+    });
   });
   state.lastCsv = rows.map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
+function getModeText(options) {
+  if (options.mode === "directed") {
+    return options.direction === "horizontal" ? "定向贯通-仅横放" : "定向贯通-仅竖放";
+  }
+  return "贯通直裁";
 }
 
 function csvCell(value) {
@@ -634,7 +814,7 @@ function clearAll() {
 
 function setMode(mode) {
   state.mode = mode;
-  document.querySelector("#mixedModeBtn").classList.toggle("active", mode === "mixed");
+  document.querySelector("#guillotineModeBtn").classList.toggle("active", mode === "guillotine");
   document.querySelector("#directedModeBtn").classList.toggle("active", mode === "directed");
   document.querySelector("#directionPanel").hidden = mode !== "directed";
   saveDraft();
@@ -668,7 +848,7 @@ function loadDraft() {
     const draft = JSON.parse(raw);
     boardsTable.innerHTML = "";
     partsTable.innerHTML = "";
-    setMode(draft.mode === "directed" ? "directed" : "mixed");
+    setMode(draft.mode === "directed" ? "directed" : "guillotine");
     document.querySelector("#kerfInput").value = draft.kerf ?? 3;
     document.querySelector("#marginInput").value = draft.margin ?? 5;
     const directionInput = document.querySelector(`input[name='direction'][value='${draft.direction || "horizontal"}']`);
@@ -721,7 +901,7 @@ document.querySelector("#importPartsBtn").addEventListener("click", importParts)
 document.querySelector("#loadExampleBtn").addEventListener("click", loadExample);
 document.querySelector("#optimizeBtn").addEventListener("click", optimize);
 document.querySelector("#exportBtn").addEventListener("click", exportCsv);
-document.querySelector("#mixedModeBtn").addEventListener("click", () => setMode("mixed"));
+document.querySelector("#guillotineModeBtn").addEventListener("click", () => setMode("guillotine"));
 document.querySelector("#directedModeBtn").addEventListener("click", () => setMode("directed"));
 document.querySelectorAll("input[name='direction'], #kerfInput, #marginInput").forEach((input) => {
   input.addEventListener("input", saveDraft);

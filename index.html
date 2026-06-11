@@ -8,7 +8,7 @@
     <meta name="apple-mobile-web-app-title" content="板材排料" />
     <title>板材排料工具</title>
     <link rel="manifest" href="./manifest.webmanifest" />
-    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./styles.css?v=3" />
   </head>
   <body>
     <main class="app-shell">
@@ -17,7 +17,7 @@
           <header class="topbar">
             <div>
               <h1>板材排料工具</h1>
-              <p>矩形板材本地排版，数据自动保留</p>
+              <p>支持贯通直裁和纹理定向贯通直裁</p>
             </div>
             <button id="loadExampleBtn" class="ghost-btn" type="button">示例</button>
           </header>
@@ -95,8 +95,8 @@
           <section class="block">
             <h2>排版模式</h2>
             <div class="mode-tabs" role="tablist" aria-label="排版模式">
-              <button id="mixedModeBtn" class="mode-btn active" type="button">混拼排版</button>
-              <button id="directedModeBtn" class="mode-btn" type="button">定向裁切排版</button>
+              <button id="guillotineModeBtn" class="mode-btn active" type="button">贯通直裁</button>
+              <button id="directedModeBtn" class="mode-btn" type="button">定向贯通直裁</button>
             </div>
             <div id="directionPanel" class="direction-panel" hidden>
               <label>
@@ -162,6 +162,6 @@
       </section>
     </main>
 
-    <script src="./app.js"></script>
+    <script src="./app.js?v=3"></script>
   </body>
 </html>
